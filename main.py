@@ -24,7 +24,7 @@ try:
 except ImportError:  # plyer absent sur le poste de dev
     gps = None
 
-__version__ = "0.5.0"
+__version__ = "0.5.1"
 AUTHOR = "Bosoochee"
 SUMMARY = (
     "D4speedmeter est un compteur pour le vélo électrique Decathlon Rockrider E-ACTV 100. "
@@ -98,6 +98,7 @@ class D4SpeedmeterApp(App):
 
     def on_start(self):
         if platform == "android":
+            self.keep_screen_on()
             self.request_android_permissions()
             Window.bind(size=lambda *_: Clock.schedule_once(self.update_insets, 0.3))
             Clock.schedule_once(self.update_insets, 0.5)
@@ -281,9 +282,26 @@ class D4SpeedmeterApp(App):
         Factory.SettingsPopup().open()
 
     # ---------- Cycle de vie Android ----------
+    def keep_screen_on(self):
+        """Empêche la mise en veille de l'écran tant que l'appli est affichée."""
+        from android.runnable import run_on_ui_thread
+        from jnius import autoclass
+
+        @run_on_ui_thread
+        def _add_flag():
+            activity = autoclass("org.kivy.android.PythonActivity").mActivity
+            params = autoclass("android.view.WindowManager$LayoutParams")
+            activity.getWindow().addFlags(params.FLAG_KEEP_SCREEN_ON)
+
+        _add_flag()
+
     def on_pause(self):
         self.trip.save()
         return True  # garde la connexion Bluetooth et le GPS actifs
+
+    def on_resume(self):
+        if platform == "android":
+            self.keep_screen_on()
 
 
 if __name__ == "__main__":
