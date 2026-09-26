@@ -1,0 +1,248 @@
+#:kivy 2.3
+
+#:set C_BG (0.07, 0.07, 0.09, 1)
+#:set C_TILE (0.13, 0.13, 0.17, 1)
+#:set C_MUTED (0.6, 0.6, 0.66, 1)
+#:set C_ACCENT (1, 0.75, 0.3, 1)
+
+<FlatButton@Button>:
+    background_normal: ""
+    background_down: ""
+    background_color: 0.25, 0.25, 0.32, 1
+    font_size: sp(15)
+
+<BluetoothButton@FlatButton>:
+    # Icône Bluetooth dessinée (la police par défaut n'a pas ce symbole).
+    # Orange : vélo non connecté (appuyer pour chercher) ; bleu : connecté (appuyer pour déconnecter).
+    connected: False
+    text: ""
+    background_color: (0.15, 0.45, 0.85, 1) if self.connected else (0.92, 0.5, 0.1, 1)
+    canvas.after:
+        Color:
+            rgba: 1, 1, 1, 1
+        Line:
+            width: max(dp(1.6), self.height * 0.035)
+            joint: "miter"
+            cap: "square"
+            points:
+                (self.center_x - self.height * 0.14, self.center_y + self.height * 0.14,
+                self.center_x + self.height * 0.14, self.center_y - self.height * 0.14,
+                self.center_x, self.center_y - self.height * 0.28,
+                self.center_x, self.center_y + self.height * 0.28,
+                self.center_x + self.height * 0.14, self.center_y + self.height * 0.14,
+                self.center_x - self.height * 0.14, self.center_y - self.height * 0.14)
+
+<GearButton>:
+    # Roue dentée dessinée dans icons.py
+    background_normal: ""
+    background_down: ""
+    background_color: 0.25, 0.25, 0.32, 1
+
+<Tile@BoxLayout>:
+    title: ""
+    value: ""
+    value_color: 1, 1, 1, 1
+    orientation: "vertical"
+    padding: dp(8), dp(4)
+    canvas.before:
+        Color:
+            rgba: C_TILE
+        RoundedRectangle:
+            pos: self.pos
+            size: self.size
+            radius: [dp(10)]
+    Label:
+        text: root.title
+        font_size: min(sp(13), self.height * 0.6)
+        color: C_MUTED
+        text_size: self.width, None
+        halign: "center"
+        shorten: True
+    Label:
+        text: root.value
+        font_size: min(sp(30), self.height * 0.8)
+        bold: True
+        color: root.value_color
+
+<SpeedScreen>:
+    orientation: "vertical"
+    padding: dp(12), dp(8) + root.inset_top, dp(12), dp(10) + root.inset_bottom
+    spacing: dp(8)
+    canvas.before:
+        Color:
+            rgba: C_BG
+        Rectangle:
+            pos: self.pos
+            size: self.size
+
+    # --- Barre du haut ---
+    BoxLayout:
+        size_hint_y: None
+        height: dp(40)
+        spacing: dp(8)
+        Label:
+            text: "D4speedmeter"
+            font_size: min(sp(20), self.height * 0.6)
+            bold: True
+            halign: "left"
+            text_size: self.size
+            valign: "middle"
+        GearButton:
+            size_hint_x: None
+            width: self.height * 1.3
+            on_release: app.open_settings_popup()
+
+    # --- Compteur : hauteur utile du cadran (ouvert en bas), sans dépasser 55 % de l'écran ---
+    FloatLayout:
+        size_hint_y: None
+        height: min(self.width * 0.86, root.height * 0.55)
+        Gauge:
+            id: gauge
+            value: root.speed
+            max_value: 50
+            pos_hint: {"x": 0, "y": 0}
+        Label:
+            text: "{:.1f}".format(root.speed)
+            bold: True
+            font_size: gauge.radius * 0.34
+            size_hint: None, None
+            size: gauge.radius * 0.9, gauge.radius * 0.36
+            center: gauge.dial_cx, gauge.dial_cy - gauge.radius * 0.30
+        Label:
+            text: "km/h"
+            color: C_MUTED
+            font_size: gauge.radius * 0.11
+            size_hint: None, None
+            size: gauge.radius * 0.5, gauge.radius * 0.14
+            center: gauge.dial_cx, gauge.dial_cy - gauge.radius * 0.58
+
+    # --- Connexion vélo ---
+    BoxLayout:
+        size_hint_y: None
+        height: dp(48)
+        spacing: dp(8)
+        Label:
+            text: root.status + "  ·  " + root.speed_source
+            shorten_from: "right"
+            font_size: min(sp(12), self.height * 0.34)
+            color: C_MUTED
+            text_size: self.size
+            halign: "left"
+            valign: "middle"
+            shorten: True
+        BluetoothButton:
+            connected: root.bike_connected
+            size_hint_x: None
+            width: self.height * 1.3
+            on_release: app.bike_button()
+
+    # --- Statistiques ---
+    GridLayout:
+        cols: 2
+        spacing: dp(8)
+        Tile:
+            title: "Vitesse max"
+            value: "{:.1f} km/h".format(root.max_speed)
+            value_color: C_ACCENT
+        Tile:
+            title: "Vitesse moyenne"
+            value: "{:.1f} km/h".format(root.avg_speed)
+        Tile:
+            title: "Batterie vélo"
+            value: "--" if root.battery < 0 else "{:.0f} %".format(root.battery)
+            value_color: (1, 1, 1, 1) if root.battery < 0 or root.battery > 20 else (1, 0.35, 0.3, 1)
+        Tile:
+            title: "Autonomie" + (" (estimée)" if root.range_estimated else "")
+            value: "--" if root.range_km < 0 else ("{}{:.0f} km".format("~" if root.range_estimated else "", root.range_km))
+
+    # --- Distance + reset ---
+    BoxLayout:
+        size_hint_y: None
+        height: dp(60)
+        spacing: dp(8)
+        Tile:
+            title: "Trip km"
+            value: "{:.2f} km".format(root.distance)
+        FlatButton:
+            text: "Trip\nreset"
+            font_size: min(sp(15), self.height * 0.28)
+            halign: "center"
+            size_hint_x: None
+            width: dp(96)
+            background_color: 0.45, 0.3, 0.12, 1
+            on_release: app.reset_trip()
+
+
+<DeviceButton@FlatButton>:
+    markup: True
+    halign: "center"
+    size_hint_y: None
+    height: dp(56)
+
+<DevicesPopup@Popup>:
+    title: "Choisir le vélo"
+    size_hint: 0.9, 0.7
+    BoxLayout:
+        orientation: "vertical"
+        spacing: dp(8)
+        Label:
+            text: "Recherche des appareils Bluetooth à proximité...\nAllumez l'écran du vélo."
+            font_size: sp(13)
+            color: C_MUTED
+            size_hint_y: None
+            height: dp(40)
+            halign: "center"
+        ScrollView:
+            BoxLayout:
+                id: device_list
+                orientation: "vertical"
+                spacing: dp(6)
+                size_hint_y: None
+                height: self.minimum_height
+        FlatButton:
+            text: "Annuler"
+            size_hint_y: None
+            height: dp(48)
+            on_release: root.dismiss()
+
+<SettingsPopup@Popup>:
+    title: "Paramètres"
+    size_hint: 0.9, 0.62
+    BoxLayout:
+        orientation: "vertical"
+        spacing: dp(10)
+        padding: dp(4)
+        Label:
+            text: "D4speedmeter"
+            font_size: sp(22)
+            bold: True
+            size_hint_y: None
+            height: dp(36)
+        Label:
+            text: "Version " + app.version
+            size_hint_y: None
+            height: dp(24)
+        Label:
+            text: "Auteur : " + app.author
+            size_hint_y: None
+            height: dp(24)
+        ScrollView:
+            Label:
+                text: app.summary
+                font_size: sp(14)
+                color: 0.85, 0.85, 0.88, 1
+                text_size: self.width, None
+                size_hint_y: None
+                height: self.texture_size[1]
+        Label:
+            text: "Journal Bluetooth :\n" + app.log_path
+            font_size: sp(11)
+            color: C_MUTED
+            text_size: self.width, None
+            size_hint_y: None
+            height: self.texture_size[1] + dp(4)
+        FlatButton:
+            text: "Fermer"
+            size_hint_y: None
+            height: dp(48)
+            on_release: root.dismiss()
