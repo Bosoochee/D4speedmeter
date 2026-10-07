@@ -3,27 +3,42 @@
 Compteur pour le vélo électrique **Decathlon Rockrider E-ACTV 100**, écrit en Python avec Kivy (Android).
 
 - Cadran 0–50 km/h + affichage numérique
-- Vitesse max, vitesse moyenne, distance depuis le dernier reset (bouton « Remise à zéro »)
-- Batterie du vélo (%) et autonomie
+- Écran de démarrage : logo + « By Bosoochee » (un point de plus par seconde)
+- Vitesse, puissance et cadence fournies par le vélo
+- Temps de déplacement (arrêté quand le vélo ne roule pas), vitesse moyenne, distance
+  depuis le dernier reset (bouton « Trip reset ») ; heure du téléphone
+- Toucher le cadran, la puissance ou la cadence : courbe depuis le dernier reset, avec
+  maximum et moyenne (remis à zéro par « Trip reset »)
+- Batterie du vélo (%)
 - Connexion Bluetooth Low Energy au vélo ; vitesse GPS du téléphone en secours
-- Bouton « Paramètres » : version, auteur, résumé
+- Voyant GPS dans le cadran (rouge : aucun satellite, orange : moins de 5, vert : 5 ou plus) ;
+  le toucher affiche le tracé GPS du trajet sur une carte OpenTopoMap (effacé par « Trip reset »)
+- Au lancement, propose d'activer la localisation si elle est coupée
+- Fonctionne écran éteint (service de premier plan + notification) ; bouton rond marche/arrêt
+  pour quitter ; toutes les données sont sauvegardées et réaffichées au redémarrage
+- Bouton « Paramètres » : version, auteur, km total du vélo, résumé
 
-## Bluetooth : état actuel
+## Protocole Bluetooth (EB100)
 
-Le vélo communique avec l'appli *Decathlon Ride* via un protocole BLE **propriétaire et non documenté**.
-L'application :
+Le vélo s'annonce en BLE sous le nom `EB100`. Son protocole propriétaire a été reconstruit
+à partir d'une capture des échanges avec l'appli Decathlon ; il est décodé dans [bike.py](bike.py).
+Les caractéristiques sont repérées par leur handle GATT (`getInstanceId()` sous Android) :
 
-1. lit les services BLE **standard** s'ils existent : batterie (`0x180F`) et vitesse/cadence (`0x1816`) ;
-2. s'abonne à **toutes** les caractéristiques du vélo et enregistre les trames brutes dans
-   `ble_log.txt` (chemin affiché dans Paramètres) ;
-3. passe les trames inconnues à `parse_proprietary()` dans [bike.py](bike.py), à compléter.
+| Handle | Rôle | Contenu |
+|---|---|---|
+| `0x0045` | commande (écriture) | init `01 05 00000001`, lecture registre `01 01 07 41 00 RR`, mode `02 05 00000020 0M` |
+| `0x0047` | réponse (notify) | écho de la commande + valeur ; trames `FF` = remplissage. Le registre `0x41` vaut toujours `0x64` : ce n'est **pas** la batterie |
+| `0x0033` | batterie (standard `0x2A19`, read/notify) | batterie en %, octet décimal (`0x41` = 65 %, vérifié sur l'écran du vélo) |
+| `0x003a` | mesures (notify) | mots 16 bits LE : puissance W×100 (offset 0), vitesse km/h×100 (6), cadence tr/min×100 (12), tension mV (16) |
+| `0x003d` | statut (notify) | `41` puis compteur total du vélo en mètres (octets 1-4, LE) ; vérifié : +281 m pour 280 m intégrés depuis la vitesse |
+| `0x0037` | événements (indicate) | non décodé |
 
-Pour décoder le protocole : roulez avec l'appli connectée, notez la vitesse/batterie/autonomie
-affichées par l'écran du vélo, puis cherchez dans le journal les octets qui varient en conséquence.
-Complétez ensuite `parse_proprietary()` pour renvoyer `speed_kmh`, `battery_pct`, `range_km`.
+À la connexion, l'appli envoie la même séquence que l'appli Decathlon (init, lecture du
+registre `0x41`, modes 1 à 3), puis relit la batterie toutes les 30 s. Toutes les trames
+et les messages d'état sont enregistrés dans `ble_log.txt` (chemin affiché dans Paramètres).
 
-Tant que l'autonomie n'est pas lue sur le vélo, elle est **estimée** : `batterie % × 70 km`
-(autonomie annoncée par Decathlon, constante `NOMINAL_RANGE_KM` dans [main.py](main.py)).
+**Distance du trajet** : « Trip reset » mémorise le compteur total du vélo ; la distance
+affichée est la différence entre le compteur actuel et cette valeur mémorisée.
 
 ## Lancer sur PC (Windows)
 
@@ -68,7 +83,11 @@ buildozer android deploy run logcat
 | `main.py` | Application : écran, GPS, permissions, popups |
 | `bike.py` | Connexion BLE au vélo (lib `able`), décodage, vélo simulé |
 | `able/`, `java_src/` | Bibliothèque BLE [able](https://github.com/b3b/able) 1.0.17 (MIT), partie Python et Java |
-| `trip.py` | Distance, vitesse max/moyenne, sauvegarde |
+| `trip.py` | Distance (compteur du vélo), temps de déplacement, max/moyennes, historique des courbes, sauvegarde |
+| `chart.py` | Widget courbe d'historique |
+| `trackmap.py` | Carte OpenTopoMap + tracé GPS (tuiles en cache dans le dossier de l'appli) |
+| `kivy_garden/mapview/` | Bibliothèque carte [mapview](https://github.com/kivy-garden/mapview) 1.0.6 (MIT), intégrée |
+| `java_src/org/d4/` | Service de premier plan (écran éteint) et compteur de satellites GNSS |
 | `gauge.py` | Widget cadran |
 | `icons.py` | Bouton roue dentée (paramètres), dessiné en code |
 | `assets/icon.png` | Icône de l'appli, générée par `tools_make_icon.py` (Pillow, non inclus dans l'APK) |

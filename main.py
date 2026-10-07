@@ -2,6 +2,7 @@
 
 import json
 import os
+import threading
 import time
 
 from kivy.animation import Animation
@@ -12,34 +13,43 @@ from kivy.factory import Factory
 from kivy.metrics import dp, sp
 from kivy.properties import BooleanProperty, NumericProperty, StringProperty
 from kivy.uix.boxlayout import BoxLayout
+from kivy.uix.floatlayout import FloatLayout
+from kivy.uix.screenmanager import FadeTransition, Screen, ScreenManager
 from kivy.utils import platform
 
 import gauge  # noqa: F401  (enregistre le widget Gauge pour le fichier .kv)
 import icons  # noqa: F401  (enregistre GearButton pour le fichier .kv)
 from bike import create_bike_link
+from chart import HistoryChart, format_duration  # noqa: F401  (HistoryChart : fichier .kv)
 from trip import TripStats
 
-try:
-    from plyer import gps
-except ImportError:  # plyer absent sur le poste de dev
-    gps = None
-
-__version__ = "0.5.1"
+__version__ = "0.9.1"
 AUTHOR = "Bosoochee"
 SUMMARY = (
     "D4speedmeter est un compteur pour le vélo électrique Decathlon Rockrider E-ACTV 100. "
-    "Il se connecte au vélo en Bluetooth pour afficher la vitesse, la batterie et "
-    "l'autonomie, et calcule la vitesse maximale, la vitesse moyenne et la distance "
-    "parcourue depuis la dernière remise à zéro. Sans vélo connecté, la vitesse est "
-    "mesurée par le GPS du téléphone."
+    "Il se connecte au vélo en Bluetooth pour afficher la vitesse, la puissance, la "
+    "cadence et la batterie, et calcule le temps de déplacement, la vitesse moyenne et la "
+    "distance parcourue (d'après le compteur total du vélo) depuis la dernière remise à "
+    "zéro. Touchez le cadran, la puissance ou la cadence pour voir la courbe du trajet. "
+    "Sans vélo connecté, la vitesse est mesurée par le GPS du téléphone."
 )
 
 MS_TO_KMH = 3.6
-NOMINAL_RANGE_KM = 70      # autonomie annoncée par Decathlon, batterie pleine
 BIKE_SPEED_TIMEOUT_S = 3   # au-delà, on repasse sur la vitesse GPS
+GPS_MIN_SPEED_KMH = 5      # vitesse GPS en dessous : bruit de position à l'arrêt
+GPS_CONFIRM_FIXES = 3      # positions successives au-dessus du seuil avant de compter le mouvement
+GPS_MAX_ACCURACY_M = 20    # position moins précise (intérieur...) : vitesse GPS ignorée
 TICK_S = 1.0
-SAVE_EVERY_TICKS = 30
+SAVE_EVERY_S = 10
 LOCATION_CHECK_TICKS = 5
+SPLASH_S = 3               # durée de l'écran de démarrage (un point de plus par seconde)
+
+# Courbes : clé de l'historique -> (titre, unité, format des valeurs)
+CHARTS = {
+    "speed": ("Vitesse", "km/h", "{:.1f}"),
+    "power": ("Puissance", "W", "{:.0f}"),
+    "cadence": ("Cadence", "tr/min", "{:.0f}"),
+}
 
 
 def shared_files_dir(fallback):
@@ -57,14 +67,39 @@ def shared_files_dir(fallback):
     return fallback
 
 
+def set_background_service(running):
+    """Démarre/arrête le service de premier plan (fonctionnement écran éteint)."""
+    if platform != "android":
+        return
+    try:
+        from jnius import autoclass
+
+        activity = autoclass("org.kivy.android.PythonActivity").mActivity
+        service = autoclass("org.d4.KeepAliveService")
+        if running:
+            service.start(activity)
+        else:
+            service.stop(activity)
+    except Exception as exc:
+        print(f"KeepAliveService indisponible : {exc!r}")
+
+
+class SplashScreen(FloatLayout):
+    """Logo + « By Bosoochee » suivi d'un point de plus chaque seconde."""
+    dots = NumericProperty(0)
+
+
 class SpeedScreen(BoxLayout):
     speed = NumericProperty(0)
-    max_speed = NumericProperty(0)
     avg_speed = NumericProperty(0)
     distance = NumericProperty(0)
+    moving_time = StringProperty("0:00")
+    clock = StringProperty("--:--")
     battery = NumericProperty(-1)      # -1 = inconnu
-    range_km = NumericProperty(-1)     # -1 = inconnu
-    range_estimated = BooleanProperty(True)
+    power = NumericProperty(-1)        # -1 = inconnu
+    cadence = NumericProperty(-1)      # -1 = inconnu
+    odometer_km = NumericProperty(-1)  # -1 = inconnu
+    gps_sats = NumericProperty(-1)     # satellites utilisés pour la position, -1 = inconnu
     speed_source = StringProperty("—")
     status = StringProperty("Vélo non connecté")
     bike_connected = BooleanProperty(False)
@@ -86,15 +121,43 @@ class D4SpeedmeterApp(App):
         self._insets_info = {}
         self.bike = create_bike_link(self.on_bike_data, self.on_bike_status,
                                      self.on_bike_devices, self.log_path)
+        # État partagé entre le thread de calcul, le Bluetooth et l'interface
+        self._lock = threading.Lock()
+        self._stopping = threading.Event()
         self._bike_speed = None
         self._bike_speed_time = 0.0
         self._gps_speed = None
+        self._power = None              # dernières mesures du vélo (None = inconnu)
+        self._cadence = None
+        self._speed = 0.0
+        self._speed_source = "—"
         self._location_enabled = True
+        self._gps = None                # org.d4.GpsMonitor (Android)
+        self._gps_count = 0             # numéro de la dernière position GPS traitée
+        self._gps_fast_fixes = 0        # positions successives au-dessus de GPS_MIN_SPEED_KMH
+        self._map_popup = None
         self._ticks = 0
         self._devices_popup = None
-        self._refresh_trip()
-        Clock.schedule_interval(self._tick, TICK_S)
-        return self.screen
+        self._chart_popup = None
+        self._refresh_ui()
+        # Calculs dans un thread : la boucle Kivy (Clock) est suspendue écran éteint
+        threading.Thread(target=self._worker, name="trip", daemon=True).start()
+        Clock.schedule_interval(self._refresh_ui, TICK_S)
+
+        self.splash = SplashScreen()
+        self.root_manager = ScreenManager(transition=FadeTransition(duration=0.4))
+        for name, widget in (("splash", self.splash), ("main", self.screen)):
+            holder = Screen(name=name)
+            holder.add_widget(widget)
+            self.root_manager.add_widget(holder)
+        self._splash_event = Clock.schedule_interval(self._splash_tick, 1)
+        return self.root_manager
+
+    def _splash_tick(self, dt):
+        self.splash.dots += 1
+        if self.splash.dots >= SPLASH_S:
+            self._splash_event.cancel()
+            Clock.schedule_once(lambda dt: setattr(self.root_manager, "current", "main"), 0.6)
 
     def on_start(self):
         if platform == "android":
@@ -102,7 +165,7 @@ class D4SpeedmeterApp(App):
             self.request_android_permissions()
             Window.bind(size=lambda *_: Clock.schedule_once(self.update_insets, 0.3))
             Clock.schedule_once(self.update_insets, 0.5)
-        Clock.schedule_once(self.write_diagnostic, 4)
+        Clock.schedule_once(self.write_diagnostic, SPLASH_S + 2)
 
     def update_insets(self, *_):
         """Réserve la place des barres d'état/navigation si l'appli s'affiche dessous."""
@@ -156,7 +219,12 @@ class D4SpeedmeterApp(App):
             pass
 
     def on_stop(self):
-        self.trip.save()
+        self._stopping.set()
+        self.save_state()
+
+    def save_state(self):
+        with self._lock:
+            self.trip.save()
 
     # ---------- Permissions / GPS ----------
     def request_android_permissions(self):
@@ -167,27 +235,88 @@ class D4SpeedmeterApp(App):
         for name in ("BLUETOOTH_SCAN", "BLUETOOTH_CONNECT"):
             if hasattr(Permission, name):
                 perms.append(getattr(Permission, name))
+        # Android 13+ : notification du service de tâche de fond (facultative)
+        optional = [Permission.POST_NOTIFICATIONS] if hasattr(Permission, "POST_NOTIFICATIONS") else []
 
         def callback(permissions, results):
-            if all(results):
-                self.start_gps()
-            else:
-                self.screen.status = "Permissions refusées : GPS/Bluetooth indisponibles"
+            granted = dict(zip(permissions, results))
+            self._on_permissions(all(granted.get(p, True) for p in perms))
 
-        request_permissions(perms, callback)
-
-    def start_gps(self):
-        if gps is None:
-            return
-        try:
-            gps.configure(on_location=self.on_location)
-            gps.start(minTime=1000, minDistance=0)
-        except NotImplementedError:
-            pass
+        request_permissions(perms + optional, callback)
 
     @mainthread
-    def on_location(self, **kwargs):
-        self._gps_speed = float(kwargs.get("speed", 0) or 0) * MS_TO_KMH
+    def _on_permissions(self, granted):
+        if granted:
+            self.start_gps()
+        else:
+            self.screen.status = "Permissions refusées : GPS/Bluetooth indisponibles"
+        # Après les permissions Bluetooth/localisation : Android 14 les exige pour ce service
+        set_background_service(True)
+        self._check_location_enabled()
+        if granted and not self._location_enabled:
+            Factory.GpsOffPopup().open()
+
+    def start_gps(self):
+        """Démarre le relais GPS Java (positions + satellites), lu par le thread de calcul."""
+        if platform != "android":
+            return
+        try:
+            from jnius import autoclass
+
+            activity = autoclass("org.kivy.android.PythonActivity").mActivity
+            monitor = autoclass("org.d4.GpsMonitor")
+            if monitor.start(activity):
+                self._gps = monitor
+        except Exception as exc:
+            print(f"GpsMonitor indisponible : {exc!r}")
+
+    def open_location_settings(self):
+        """Ouvre les réglages Android de localisation pour activer le GPS."""
+        try:
+            from jnius import autoclass
+
+            activity = autoclass("org.kivy.android.PythonActivity").mActivity
+            intent = autoclass("android.content.Intent")(
+                autoclass("android.provider.Settings").ACTION_LOCATION_SOURCE_SETTINGS)
+            activity.startActivity(intent)
+        except Exception as exc:
+            print(f"Réglages de localisation indisponibles : {exc!r}")
+
+    def on_position(self, lat, lon, speed_ms=None, accuracy_m=None):
+        """Nouvelle position GPS : vitesse de secours et tracé (à appeler sous self._lock)."""
+        precise = accuracy_m is None or accuracy_m <= GPS_MAX_ACCURACY_M
+        self._gps_speed = speed_ms * MS_TO_KMH if speed_ms is not None and precise else None
+        if self._gps_speed is not None and self._gps_speed >= GPS_MIN_SPEED_KMH:
+            self._gps_fast_fixes += 1
+        else:
+            self._gps_fast_fixes = 0
+        self.trip.add_position(lat, lon, accuracy_m)
+
+    def _poll_gps(self):
+        """Lit la dernière position du relais Java (thread de calcul, sous self._lock)."""
+        gps = self._gps
+        if gps is None:
+            return
+        count = gps.getLocationCount()
+        if count != self._gps_count:
+            self._gps_count = count
+            speed, accuracy = gps.getSpeed(), gps.getAccuracy()
+            self.on_position(gps.getLatitude(), gps.getLongitude(),
+                             speed if speed >= 0 else None, accuracy if accuracy >= 0 else None)
+        elif not gps.hasRecentLocation():
+            self._gps_speed = None  # plus de position : pas de vitesse GPS périmée
+            self._gps_fast_fixes = 0
+
+    def _satellites(self):
+        """Satellites utilisés pour la position, -1 si inconnu (pas d'Android)."""
+        if self._gps is None:
+            return -1
+        if not self._location_enabled:
+            return 0
+        try:
+            return int(self._gps.getUsedInFix())
+        except Exception:
+            return -1
 
     # ---------- Bluetooth ----------
     def bike_button(self):
@@ -217,31 +346,56 @@ class D4SpeedmeterApp(App):
     def on_bike_status(self, text):
         self.screen.status = text
         self.screen.bike_connected = self.bike.connected
+        if not self.bike.connected:  # mesures instantanées périmées
+            with self._lock:
+                self._power = self._cadence = None
+        self._refresh_ui()
 
     def on_bike_data(self, values):
-        self.screen.bike_connected = True
-        if "speed_kmh" in values:
-            self._bike_speed = values["speed_kmh"]
-            self._bike_speed_time = time.monotonic()
-        if "battery_pct" in values:
-            self.screen.battery = values["battery_pct"]
-        if "range_km" in values:
-            self.screen.range_km = values["range_km"]
-            self.screen.range_estimated = False
-        elif self.screen.battery >= 0 and self.screen.range_estimated:
-            self.screen.range_km = self.screen.battery / 100 * NOMINAL_RANGE_KM
+        """Appelé depuis le thread Bluetooth, y compris écran éteint."""
+        with self._lock:
+            if "speed_kmh" in values:
+                self._bike_speed = values["speed_kmh"]
+                self._bike_speed_time = time.monotonic()
+            if "battery_pct" in values:
+                self.trip.battery_pct = values["battery_pct"]
+            if "power_w" in values:
+                self._power = values["power_w"]
+            if "cadence_rpm" in values:
+                self._cadence = values["cadence_rpm"]
+            if "odometer_m" in values:
+                self.trip.update_odometer(values["odometer_m"])
 
-    # ---------- Mise à jour périodique ----------
+    # ---------- Calcul en tâche de fond ----------
     def _current_speed(self):
+        """Vitesse courante et sa source (à appeler sous self._lock)."""
         if self._bike_speed is not None and \
                 time.monotonic() - self._bike_speed_time < BIKE_SPEED_TIMEOUT_S:
-            self.screen.speed_source = "vélo"
-            return self._bike_speed
+            return self._bike_speed, "vélo"
         if self._gps_speed is not None and self._location_enabled:
-            self.screen.speed_source = "GPS"
-            return self._gps_speed
-        self.screen.speed_source = "—" if self._location_enabled else "GPS désactivé"
-        return 0.0
+            # À l'arrêt, le GPS « bouge » de quelques km/h : vitesse nulle tant que le
+            # mouvement n'est pas confirmé par plusieurs positions au-dessus du seuil
+            moving = self._gps_fast_fixes >= GPS_CONFIRM_FIXES
+            return (self._gps_speed if moving else 0.0), "GPS"
+        return 0.0, "—" if self._location_enabled else "GPS désactivé"
+
+    def _worker(self):
+        """Intègre le trajet chaque seconde et sauvegarde régulièrement, écran éteint compris."""
+        last = last_save = time.monotonic()
+        while not self._stopping.wait(TICK_S):
+            now = time.monotonic()
+            dt = min(now - last, 2 * TICK_S)  # pas de rattrapage après une suspension
+            last = now
+            with self._lock:
+                try:
+                    self._poll_gps()
+                except Exception as exc:  # relais Java indisponible : on garde le reste
+                    print(f"Lecture GPS impossible : {exc!r}")
+                self._speed, self._speed_source = self._current_speed()
+                self.trip.update(dt, self._speed, self._power, self._cadence)
+                if now - last_save >= SAVE_EVERY_S:
+                    self.trip.save()
+                    last_save = now
 
     def _check_location_enabled(self):
         """Vérifie que la localisation du téléphone est activée (Android 9+)."""
@@ -256,26 +410,88 @@ class D4SpeedmeterApp(App):
         except Exception:
             self._location_enabled = True
 
-    def _tick(self, dt):
+    # ---------- Affichage (boucle Kivy, au premier plan) ----------
+    def _refresh_ui(self, *_):
         if self._ticks % LOCATION_CHECK_TICKS == 0:
             self._check_location_enabled()
-        speed = self._current_speed()
-        Animation.cancel_all(self.screen, "speed")
-        Animation(speed=speed, duration=0.6, t="out_quad").start(self.screen)
-        self.trip.update(speed, dt)
-        self._refresh_trip()
         self._ticks += 1
-        if self._ticks % SAVE_EVERY_TICKS == 0:
-            self.trip.save()
-
-    def _refresh_trip(self):
-        self.screen.max_speed = self.trip.max_kmh
-        self.screen.avg_speed = self.trip.avg_kmh
-        self.screen.distance = self.trip.distance_km
+        s = self.screen
+        with self._lock:
+            speed, s.speed_source = self._speed, self._speed_source
+            s.power = -1 if self._power is None else self._power
+            s.cadence = -1 if self._cadence is None else self._cadence
+            s.battery = -1 if self.trip.battery_pct is None else self.trip.battery_pct
+            s.avg_speed = self.trip.avg_kmh
+            s.distance = self.trip.distance_km
+            s.moving_time = format_duration(self.trip.moving_s)
+            if self.trip.odometer_m is not None:
+                s.odometer_km = self.trip.odometer_m / 1000
+            self._update_chart()
+            track = self.trip.track
+            if self._map_popup is not None and len(track) != len(self._map_popup.map.track_layer.points):
+                self._map_popup.map.track_layer.points = [tuple(p) for p in track]
+        s.gps_sats = self._satellites()
+        s.clock = time.strftime("%H:%M")
+        Animation.cancel_all(s, "speed")
+        Animation(speed=speed, duration=0.6, t="out_quad").start(s)
 
     def reset_trip(self):
-        self.trip.reset()
-        self._refresh_trip()
+        with self._lock:
+            self.trip.reset()
+        self._refresh_ui()
+
+    # ---------- Arrêt ----------
+    def quit_app(self):
+        """Bouton « Quitter » : sauvegarde, coupe le Bluetooth et le service, ferme l'appli."""
+        self._stopping.set()
+        self.save_state()
+        if self.bike.connected:
+            self.bike.disconnect()
+        set_background_service(False)
+        self.stop()
+
+    # ---------- Courbes ----------
+    def open_chart(self, key):
+        title, unit, _ = CHARTS[key]
+        popup = Factory.ChartPopup(title=f"{title} depuis le dernier reset ({unit})")
+        popup.key = key
+        popup.bind(on_dismiss=lambda *_: setattr(self, "_chart_popup", None))
+        self._chart_popup = popup
+        with self._lock:
+            self._update_chart()
+        popup.open()
+
+    def _update_chart(self):
+        """Met à jour la courbe ouverte (à appeler sous self._lock)."""
+        popup = self._chart_popup
+        if popup is None:
+            return
+        _, unit, fmt = CHARTS[popup.key]
+        chart = popup.ids.chart
+        chart.step_s = self.trip.history_step_s
+        chart.values = list(self.trip.history[popup.key])
+        mean = self.trip.avg_kmh if popup.key == "speed" else self.trip.mean(popup.key)
+        popup.summary = (f"Max : {fmt.format(self.trip.peak[popup.key])} {unit}     "
+                         f"Moyenne : {fmt.format(mean)} {unit}")
+
+    # ---------- Carte du tracé GPS ----------
+    def open_map(self):
+        from trackmap import TrackMap  # import tardif : la carte n'est pas utile au démarrage
+
+        popup = Factory.MapPopup()
+        popup.map = TrackMap(cache_dir=os.path.join(self.user_data_dir, "tiles"))
+        popup.ids.map_holder.add_widget(popup.map)
+        with self._lock:
+            points = list(self.trip.track)
+        popup.bind(on_dismiss=lambda *_: setattr(self, "_map_popup", None))
+        self._map_popup = popup
+        popup.open()
+        # La taille de la carte n'est connue qu'après l'ouverture
+        Clock.schedule_once(lambda dt: popup.map.show_track(points), 0.2)
+
+    def recenter_map(self):
+        if self._map_popup is not None:
+            self._map_popup.map.fit_track()
 
     # ---------- Paramètres ----------
     def open_settings_popup(self):
@@ -296,8 +512,8 @@ class D4SpeedmeterApp(App):
         _add_flag()
 
     def on_pause(self):
-        self.trip.save()
-        return True  # garde la connexion Bluetooth et le GPS actifs
+        self.save_state()
+        return True  # le thread de calcul et le Bluetooth continuent (service de premier plan)
 
     def on_resume(self):
         if platform == "android":

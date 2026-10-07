@@ -1,15 +1,17 @@
-"""Connexion Bluetooth Low Energy au vélo (Rockrider E-ACTV 100).
+"""Connexion Bluetooth Low Energy au vélo (Rockrider E-ACTV 100, nom BLE « EB100 »).
 
-Le protocole Bluetooth du vélo est propriétaire (utilisé par l'appli Decathlon Ride)
-et n'est pas documenté publiquement. Ce module :
+Le protocole propriétaire du vélo a été reconstruit à partir d'une capture des échanges
+avec l'appli Decathlon. Caractéristiques utilisées (repérées par leur handle GATT) :
 
-1. lit les services BLE *standard* s'ils sont exposés par le vélo :
-   - Battery Service (0x180F / 0x2A19)            -> batterie en %
-   - Cycling Speed and Cadence (0x1816 / 0x2A5B)  -> vitesse (tours de roue)
-2. s'abonne à *toutes* les caractéristiques notifiables et enregistre les trames
-   brutes dans un journal, pour permettre de décoder le protocole propriétaire ;
-3. passe chaque trame inconnue à `parse_proprietary()`, à compléter une fois
-   le protocole identifié.
+- 0x0045 (écriture)  : canal de commande (init, lecture de registres, mode) ;
+- 0x0047 (notify)    : réponses aux commandes (non exploitées) ;
+- 0x003a (notify)    : mesures - puissance, vitesse, cadence (/100), tension (mV) ;
+- 0x003d (notify)    : statut - compteur total du vélo (odomètre) en mètres ;
+- 0x0037 (indicate)  : événements (non décodés).
+
+La batterie (%) vient du Battery Service *standard* (0x2A19, handle 0x0033), vérifié
+contre l'affichage du vélo. Le service standard vitesse/cadence (0x2A5B) est lu s'il
+existe, et toutes les trames sont enregistrées dans le journal BLE.
 
 Sur Android, la couche BLE repose sur la bibliothèque `able` (licence MIT), intégrée
 au projet : code Python dans `able/`, code Java dans `java_src/`.
@@ -17,6 +19,7 @@ au projet : code Python dans `able/`, code Java dans `java_src/`.
 
 import struct
 import time
+import traceback
 
 from kivy.clock import Clock, mainthread
 from kivy.utils import platform
@@ -31,6 +34,21 @@ PROP_INDICATE = 0x20
 PROP_READ = 0x02
 STATE_CONNECTED = 2  # android.bluetooth.BluetoothProfile.STATE_CONNECTED
 UNNAMED = "(sans nom)"
+
+# Handles GATT du protocole EB100. Sur Android, BluetoothGattCharacteristic.getInstanceId()
+# renvoie le handle de la valeur de la caractéristique.
+H_MEASURE = 0x003A
+H_STATUS = 0x003D
+H_COMMAND = 0x0045
+
+# Registre lu par l'appli Decathlon à la connexion : il vaut toujours 0x64 et ce n'est
+# PAS la batterie (le vélo affiche 65 % quand 0x2A19 vaut 65). On le lit pour reproduire
+# la séquence de l'appli.
+REG_41 = 0x41
+BATTERY_POLL_S = 30
+CMD_INIT = bytes.fromhex("010500000001")
+# Commandes de mode envoyées par l'appli Decathlon avant le démarrage du flux de mesures
+CMD_MODES = [bytes.fromhex(f"02050000002{m:03d}") for m in (1, 2, 3)]
 
 
 def java_bytes(value):
@@ -62,14 +80,28 @@ class CscParser:
         return d_revs * WHEEL_CIRCUMFERENCE_M / d_time * 3.6
 
 
-def parse_proprietary(uuid, data):
-    """Décode une trame propriétaire Decathlon.
+def cmd_read_register(register):
+    return bytes((0x01, 0x01, 0x07, 0x41, 0x00, register))
 
-    Retourne un dict avec tout ou partie des clés : speed_kmh, battery_pct, range_km.
-    Le format n'étant pas documenté, rien n'est décodé pour l'instant : utilisez le
-    journal BLE (voir Paramètres) pour identifier les octets correspondants.
-    """
-    return {}
+
+def parse_measure(data):
+    """Flux 0x003a : mots de 16 bits little-endian aux offsets 0, 6, 12 et 16."""
+    if len(data) < 18:
+        return {}
+    power, speed, cadence, millivolts = (struct.unpack_from("<H", data, offset)[0]
+                                         for offset in (0, 6, 12, 16))
+    return {"power_w": power / 100, "speed_kmh": speed / 100,
+            "cadence_rpm": cadence / 100, "voltage_v": millivolts / 1000}
+
+
+def parse_status(data):
+    """Flux 0x003d : en-tête 0x41 puis compteur total en mètres (octets 1 à 4, LE)."""
+    if len(data) < 5 or data[0] != 0x41:
+        return {}
+    return {"odometer_m": struct.unpack_from("<I", data, 1)[0]}
+
+
+PARSERS = {H_MEASURE: parse_measure, H_STATUS: parse_status}
 
 
 class BikeLinkBase:
@@ -109,6 +141,7 @@ class SimulatedBike(BikeLinkBase):
         self._event = None
         self._speed = 0.0
         self._battery = 100.0
+        self._odometer_m = 33557.0
 
     def scan(self):
         self.on_status("Recherche (simulation)...")
@@ -130,7 +163,16 @@ class SimulatedBike(BikeLinkBase):
     def _tick(self, dt):
         self._speed = max(0.0, min(self._speed + self._rand.uniform(-3, 3.5), 32.0))
         self._battery = max(0.0, self._battery - 0.02)
-        self.on_data({"speed_kmh": self._speed, "battery_pct": self._battery})
+        self._odometer_m += self._speed / 3.6 * dt
+        moving = self._speed > 1
+        self.on_data({
+            "speed_kmh": self._speed,
+            "cadence_rpm": self._speed * 2.2 if moving else 0.0,
+            "power_w": self._rand.uniform(80, 250) if moving else 0.0,
+            "voltage_v": 36 + 6 * self._battery / 100,
+            "battery_pct": round(self._battery),
+            "odometer_m": int(self._odometer_m),
+        })
 
 
 if platform == "android":
@@ -159,15 +201,22 @@ if platform == "android":
         def on_connection_state_change(self, status, state):
             self.link.handle_connection(status, state)
 
-        def on_services(self, services, status):
-            self.link.handle_services(services, status)
+        def on_services(self, status, services):
+            # able/android/jni.py envoie (status, services), à l'inverse de sa doc
+            try:
+                self.link.handle_services(services, status)
+            except Exception:  # appelé depuis un thread Java : l'erreur serait perdue
+                self.link.log("ERROR " + traceback.format_exc())
 
         def on_characteristic_read(self, characteristic, status):
             if status == GATT_SUCCESS:
-                self.link.handle_value(characteristic)
+                self.on_characteristic_changed(characteristic)
 
         def on_characteristic_changed(self, characteristic):
-            self.link.handle_value(characteristic)
+            try:
+                self.link.handle_value(characteristic)
+            except Exception:
+                self.link.log("ERROR " + traceback.format_exc())
 
     class AndroidBikeLink(BikeLinkBase):
         SCAN_SECONDS = 10
@@ -177,6 +226,9 @@ if platform == "android":
             self.ble = _BleDispatcher(self)
             self._found = {}
             self._csc = CscParser()
+            self._command = None
+            self._battery_char = None
+            self._poll_event = None
 
         # ----- Scan -----
         def scan(self):
@@ -207,6 +259,7 @@ if platform == "android":
             self.ble.connect_gatt(entry[1])
 
         def disconnect(self):
+            self._stop_polling()
             self.ble.close_gatt()
             self.connected = False
             self._status("Déconnecté")
@@ -218,6 +271,7 @@ if platform == "android":
                 self.ble.discover_services()
             else:
                 self.connected = False
+                self._stop_polling()
                 self._status("Connexion perdue")
                 self.ble.close_gatt()
 
@@ -226,41 +280,81 @@ if platform == "android":
                 self._status("Échec de la découverte des services")
                 return
             # `able` met les opérations GATT en file d'attente : on peut tout demander d'un coup.
+            self._command = None
+            self._battery_char = None
             for service_uuid, chars in services.items():
                 for char_uuid, char in chars.items():
                     props = char.getProperties()
-                    self.log(f"CHAR service={service_uuid} char={char_uuid} props=0x{props:02x}")
+                    handle = char.getInstanceId()
+                    self.log(f"CHAR service={service_uuid} char={char_uuid} "
+                             f"handle=0x{handle:04x} props=0x{props:02x}")
+                    if handle == H_COMMAND:
+                        self._command = char
+                    if char_uuid == UUID_BATTERY_LEVEL:
+                        self._battery_char = char
                     if props & PROP_NOTIFY:
                         self.ble.enable_notifications(char, True, False)
                     elif props & PROP_INDICATE:
                         self.ble.enable_notifications(char, True, True)
                     if props & PROP_READ:
                         self.ble.read_characteristic(char)
+            if self._command is None:
+                self.log("Canal de commande EB100 (handle 0x0045) introuvable")
+                self._status("Vélo connecté (protocole EB100 non reconnu)")
+                return
+            # Même séquence que l'appli Decathlon : init, lecture registre 0x41, modes
+            for command in [CMD_INIT, cmd_read_register(REG_41)] + CMD_MODES:
+                self._send(command)
+            self._start_polling()
             self._status("Vélo connecté")
+
+        def _send(self, command):
+            if self._command is not None:
+                self.log(f"SEND {command.hex(' ')}")
+                self.ble.write_characteristic(self._command, command)
+
+        @mainthread
+        def _start_polling(self):
+            """Relit la batterie régulièrement, en plus de ses notifications."""
+            self._stop_polling()
+            if self._battery_char is not None:
+                self._poll_event = Clock.schedule_interval(
+                    lambda dt: self.ble.read_characteristic(self._battery_char), BATTERY_POLL_S)
+
+        def _stop_polling(self):
+            if self._poll_event is not None:
+                self._poll_event.cancel()
+                self._poll_event = None
 
         # ----- Décodage -----
         def handle_value(self, characteristic):
             uuid = str(characteristic.getUuid().toString()).lower()
+            handle = characteristic.getInstanceId()
             data = java_bytes(characteristic.getValue())
-            self.log(f"DATA {uuid} {data.hex(' ')}")
+            self.log(f"DATA 0x{handle:04x} {uuid} {data.hex(' ')}")
             values = {}
             if uuid == UUID_BATTERY_LEVEL:
                 values["battery_pct"] = parse_battery(data)
             elif uuid == UUID_CSC_MEASUREMENT:
                 values["speed_kmh"] = self._csc.parse(data)
-            else:
-                values.update(parse_proprietary(uuid, data))
+            elif handle in PARSERS:
+                values.update(PARSERS[handle](data))
             values = {k: v for k, v in values.items() if v is not None}
             if values:
                 self._data(values)
 
         # ----- Retour sur le thread UI -----
-        @mainthread
         def _status(self, text):
-            self.on_status(text)
+            self.log(f"STATUS {text}")
+            self._status_ui(text)
 
         @mainthread
+        def _status_ui(self, text):
+            self.on_status(text)
+
         def _data(self, values):
+            # Appelé directement depuis le thread Bluetooth (pas via @mainthread) : la boucle
+            # Kivy est suspendue écran éteint, les mesures doivent continuer à être traitées.
             self.on_data(values)
 
         @mainthread
