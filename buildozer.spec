@@ -6,7 +6,7 @@ source.dir = .
 source.include_exts = py,png,jpg,kv,atlas,ttf
 source.exclude_dirs = java_src,bin,.venv
 source.exclude_patterns = tools_*.py
-version = 0.10.0
+version = 0.11.0
 
 requirements = python3,kivy==2.3.1,plyer,android,charset_normalizer==3.4.5
 

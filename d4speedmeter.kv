@@ -97,9 +97,13 @@
             text: "D4speedmeter"
             font_size: min(sp(20), self.height * 0.6)
             bold: True
-            halign: "left"
-            text_size: self.size
-            valign: "middle"
+            size_hint_x: None
+            width: self.texture_size[0]
+        HeadlightBadge:
+            light_on: root.light_on
+            size_hint_x: None
+            width: self.height
+        Widget:
         GearButton:
             size_hint_x: None
             width: self.height * 1.3
@@ -211,6 +215,39 @@
 
 
 <TapArea@ButtonBehavior+FloatLayout>:
+
+<HeadlightBadge@Widget>:
+    # Voyant rond du phare (symbole de phare de voiture) : gris éteint, vert allumé.
+    # Simple affichage : le phare se commande au guidon, le protocole n'a pas de commande.
+    light_on: False
+    canvas:
+        Color:
+            rgba: (0.2, 0.62, 0.28, 1) if self.light_on else (0.3, 0.3, 0.36, 1)
+        Ellipse:
+            pos: self.center_x - min(self.size) / 2, self.center_y - min(self.size) / 2
+            size: min(self.size), min(self.size)
+        Color:
+            rgba: (1, 1, 1, 1) if self.light_on else (0.62, 0.62, 0.68, 1)
+        # Corps du phare en « D » (demi-cercle à droite, côté plat à gauche)
+        Line:
+            ellipse: self.center_x - min(self.size) * 0.12, self.center_y - min(self.size) * 0.2, min(self.size) * 0.4, min(self.size) * 0.4, 0, 180
+            width: max(dp(1.3), min(self.size) * 0.045)
+        Line:
+            points: self.center_x + min(self.size) * 0.08, self.center_y + min(self.size) * 0.2, self.center_x + min(self.size) * 0.08, self.center_y - min(self.size) * 0.2
+            width: max(dp(1.3), min(self.size) * 0.045)
+        # Faisceaux
+        Line:
+            points: self.center_x - min(self.size) * 0.30, self.center_y + min(self.size) * 0.09, self.center_x - min(self.size) * 0.03, self.center_y + min(self.size) * 0.15
+            width: max(dp(1.2), min(self.size) * 0.04)
+            cap: "round"
+        Line:
+            points: self.center_x - min(self.size) * 0.30, self.center_y - min(self.size) * 0.03, self.center_x - min(self.size) * 0.03, self.center_y + min(self.size) * 0.03
+            width: max(dp(1.2), min(self.size) * 0.04)
+            cap: "round"
+        Line:
+            points: self.center_x - min(self.size) * 0.30, self.center_y - min(self.size) * 0.15, self.center_x - min(self.size) * 0.03, self.center_y - min(self.size) * 0.09
+            width: max(dp(1.2), min(self.size) * 0.04)
+            cap: "round"
 
 <ResetButton@ButtonBehavior+Widget>:
     # Bouton rond « Trip reset » : flèche circulaire (cercle ouvert + pointe en haut)

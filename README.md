@@ -4,6 +4,7 @@ Compteur pour le vélo électrique **Decathlon Rockrider E-ACTV 100**, écrit en
 
 - Cadran 0–50 km/h + affichage numérique ; cercle aux couleurs du mode d'assistance du vélo
   (Eco vert, Medium orange, Boost rouge)
+- Voyant du phare du vélo à côté du titre (gris : éteint, vert : allumé)
 - Écran de démarrage : logo + « By Bosoochee » (un point de plus par seconde)
 - Vitesse, puissance et cadence fournies par le vélo
 - Temps de déplacement (arrêté quand le vélo ne roule pas), vitesse moyenne, distance
@@ -32,7 +33,7 @@ Les caractéristiques sont repérées par leur handle GATT (`getInstanceId()` so
 | `0x0033` | batterie (standard `0x2A19`, read/notify) | batterie en %, octet décimal (`0x41` = 65 %, vérifié sur l'écran du vélo) |
 | `0x003a` | mesures (notify) | mots 16 bits LE : puissance W×100 (offset 0), vitesse km/h×100 (6), cadence tr/min×100 (12), tension mV (16) |
 | `0x003d` | statut (notify) | `41` puis compteur total du vélo en mètres (octets 1-4, LE) ; vérifié : +281 m pour 280 m intégrés depuis la vitesse |
-| `0x0037` | événements (indicate) | octet 3 = mode d'assistance actif (1 Eco, 2 Medium, 3 Boost), à chaque changement et périodiquement |
+| `0x0037` | événements (indicate) | octet 2 = phare (0 éteint, 1 allumé ; commandé au guidon, pas de commande BLE), octet 3 = mode d'assistance actif (1 Eco, 2 Medium, 3 Boost) ; à chaque changement et périodiquement |
 
 À la connexion, l'appli envoie l'init et la lecture du registre `0x41` (comme l'appli
 Decathlon), mais **pas** de commande `02 05` : elle changerait le mode d'assistance. Elle

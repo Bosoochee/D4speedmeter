@@ -7,8 +7,9 @@ avec l'appli Decathlon. Caractéristiques utilisées (repérées par leur handle
 - 0x0047 (notify)    : réponses aux commandes (non exploitées) ;
 - 0x003a (notify)    : mesures - puissance, vitesse, cadence (/100), tension (mV) ;
 - 0x003d (notify)    : statut - compteur total du vélo (odomètre) en mètres ;
-- 0x0037 (indicate)  : événements - octet 3 = mode d'assistance actif (1 Eco, 2 Medium,
-  3 Boost), émis à chaque changement de mode et périodiquement.
+- 0x0037 (indicate)  : événements - octet 2 = phare (0 éteint, 1 allumé ; le phare se
+  commande au guidon, aucune commande BLE), octet 3 = mode d'assistance actif (1 Eco,
+  2 Medium, 3 Boost) ; émis à chaque changement d'état et périodiquement.
 
 La batterie (%) vient du Battery Service *standard* (0x2A19, handle 0x0033), vérifié
 contre l'affichage du vélo. Le service standard vitesse/cadence (0x2A5B) est lu s'il
@@ -106,10 +107,13 @@ def parse_status(data):
 
 
 def parse_events(data):
-    """Événements 0x0037 : octet 3 = mode d'assistance actif."""
-    if len(data) < 4 or data[3] not in ASSIST_MODES:
-        return {}
-    return {"assist_mode": data[3]}
+    """Événements 0x0037 : octet 2 = phare (0 éteint, 1 allumé), octet 3 = mode d'assistance."""
+    values = {}
+    if len(data) >= 3 and data[2] in (0, 1):
+        values["light_on"] = bool(data[2])
+    if len(data) >= 4 and data[3] in ASSIST_MODES:
+        values["assist_mode"] = data[3]
+    return values
 
 
 PARSERS = {H_MEASURE: parse_measure, H_STATUS: parse_status, H_EVENTS: parse_events}
@@ -184,6 +188,7 @@ class SimulatedBike(BikeLinkBase):
             "battery_pct": round(self._battery),
             "odometer_m": int(self._odometer_m),
             "assist_mode": 1 + int(time.monotonic() // 5) % 3,  # change toutes les 5 s
+            "light_on": int(time.monotonic() // 7) % 2 == 1,     # bascule toutes les 7 s
         })
 
 
