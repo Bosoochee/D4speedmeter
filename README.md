@@ -2,7 +2,8 @@
 
 Compteur pour le vélo électrique **Decathlon Rockrider E-ACTV 100**, écrit en Python avec Kivy (Android).
 
-- Cadran 0–50 km/h + affichage numérique
+- Cadran 0–50 km/h + affichage numérique ; cercle aux couleurs du mode d'assistance du vélo
+  (Eco vert, Medium orange, Boost rouge)
 - Écran de démarrage : logo + « By Bosoochee » (un point de plus par seconde)
 - Vitesse, puissance et cadence fournies par le vélo
 - Temps de déplacement (arrêté quand le vélo ne roule pas), vitesse moyenne, distance
@@ -26,15 +27,16 @@ Les caractéristiques sont repérées par leur handle GATT (`getInstanceId()` so
 
 | Handle | Rôle | Contenu |
 |---|---|---|
-| `0x0045` | commande (écriture) | init `01 05 00000001`, lecture registre `01 01 07 41 00 RR`, mode `02 05 00000020 0M` |
+| `0x0045` | commande (écriture) | init `01 05 00000001`, lecture registre `01 01 07 41 00 RR`, réglage du mode d'assistance `02 05 00000020 0M` (M = 1 Eco, 2 Medium, 3 Boost) |
 | `0x0047` | réponse (notify) | écho de la commande + valeur ; trames `FF` = remplissage. Le registre `0x41` vaut toujours `0x64` : ce n'est **pas** la batterie |
 | `0x0033` | batterie (standard `0x2A19`, read/notify) | batterie en %, octet décimal (`0x41` = 65 %, vérifié sur l'écran du vélo) |
 | `0x003a` | mesures (notify) | mots 16 bits LE : puissance W×100 (offset 0), vitesse km/h×100 (6), cadence tr/min×100 (12), tension mV (16) |
 | `0x003d` | statut (notify) | `41` puis compteur total du vélo en mètres (octets 1-4, LE) ; vérifié : +281 m pour 280 m intégrés depuis la vitesse |
-| `0x0037` | événements (indicate) | non décodé |
+| `0x0037` | événements (indicate) | octet 3 = mode d'assistance actif (1 Eco, 2 Medium, 3 Boost), à chaque changement et périodiquement |
 
-À la connexion, l'appli envoie la même séquence que l'appli Decathlon (init, lecture du
-registre `0x41`, modes 1 à 3), puis relit la batterie toutes les 30 s. Toutes les trames
+À la connexion, l'appli envoie l'init et la lecture du registre `0x41` (comme l'appli
+Decathlon), mais **pas** de commande `02 05` : elle changerait le mode d'assistance. Elle
+relit ensuite la batterie toutes les 30 s. Toutes les trames
 et les messages d'état sont enregistrés dans `ble_log.txt` (chemin affiché dans Paramètres).
 
 **Distance du trajet** : « Trip reset » mémorise le compteur total du vélo ; la distance

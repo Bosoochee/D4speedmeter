@@ -3,11 +3,12 @@
 Le protocole propriétaire du vélo a été reconstruit à partir d'une capture des échanges
 avec l'appli Decathlon. Caractéristiques utilisées (repérées par leur handle GATT) :
 
-- 0x0045 (écriture)  : canal de commande (init, lecture de registres, mode) ;
+- 0x0045 (écriture)  : canal de commande (init, lecture de registres, mode d'assistance) ;
 - 0x0047 (notify)    : réponses aux commandes (non exploitées) ;
 - 0x003a (notify)    : mesures - puissance, vitesse, cadence (/100), tension (mV) ;
 - 0x003d (notify)    : statut - compteur total du vélo (odomètre) en mètres ;
-- 0x0037 (indicate)  : événements (non décodés).
+- 0x0037 (indicate)  : événements - octet 3 = mode d'assistance actif (1 Eco, 2 Medium,
+  3 Boost), émis à chaque changement de mode et périodiquement.
 
 La batterie (%) vient du Battery Service *standard* (0x2A19, handle 0x0033), vérifié
 contre l'affichage du vélo. Le service standard vitesse/cadence (0x2A5B) est lu s'il
@@ -37,9 +38,12 @@ UNNAMED = "(sans nom)"
 
 # Handles GATT du protocole EB100. Sur Android, BluetoothGattCharacteristic.getInstanceId()
 # renvoie le handle de la valeur de la caractéristique.
+H_EVENTS = 0x0037
 H_MEASURE = 0x003A
 H_STATUS = 0x003D
 H_COMMAND = 0x0045
+
+ASSIST_MODES = {1: "Eco", 2: "Medium", 3: "Boost"}
 
 # Registre lu par l'appli Decathlon à la connexion : il vaut toujours 0x64 et ce n'est
 # PAS la batterie (le vélo affiche 65 % quand 0x2A19 vaut 65). On le lit pour reproduire
@@ -47,8 +51,8 @@ H_COMMAND = 0x0045
 REG_41 = 0x41
 BATTERY_POLL_S = 30
 CMD_INIT = bytes.fromhex("010500000001")
-# Commandes de mode envoyées par l'appli Decathlon avant le démarrage du flux de mesures
-CMD_MODES = [bytes.fromhex(f"02050000002{m:03d}") for m in (1, 2, 3)]
+# NB : « 02 05 00000020 0M » CHANGE le mode d'assistance (M = 1 Eco, 2 Medium, 3 Boost).
+# L'appli ne l'envoie donc pas à la connexion : le flux de mesures démarre sans.
 
 
 def java_bytes(value):
@@ -101,7 +105,14 @@ def parse_status(data):
     return {"odometer_m": struct.unpack_from("<I", data, 1)[0]}
 
 
-PARSERS = {H_MEASURE: parse_measure, H_STATUS: parse_status}
+def parse_events(data):
+    """Événements 0x0037 : octet 3 = mode d'assistance actif."""
+    if len(data) < 4 or data[3] not in ASSIST_MODES:
+        return {}
+    return {"assist_mode": data[3]}
+
+
+PARSERS = {H_MEASURE: parse_measure, H_STATUS: parse_status, H_EVENTS: parse_events}
 
 
 class BikeLinkBase:
@@ -172,6 +183,7 @@ class SimulatedBike(BikeLinkBase):
             "voltage_v": 36 + 6 * self._battery / 100,
             "battery_pct": round(self._battery),
             "odometer_m": int(self._odometer_m),
+            "assist_mode": 1 + int(time.monotonic() // 5) % 3,  # change toutes les 5 s
         })
 
 
@@ -302,8 +314,8 @@ if platform == "android":
                 self.log("Canal de commande EB100 (handle 0x0045) introuvable")
                 self._status("Vélo connecté (protocole EB100 non reconnu)")
                 return
-            # Même séquence que l'appli Decathlon : init, lecture registre 0x41, modes
-            for command in [CMD_INIT, cmd_read_register(REG_41)] + CMD_MODES:
+            # Début de la séquence de l'appli Decathlon : init, lecture du registre 0x41
+            for command in (CMD_INIT, cmd_read_register(REG_41)):
                 self._send(command)
             self._start_polling()
             self._status("Vélo connecté")

@@ -23,7 +23,7 @@ from bike import create_bike_link
 from chart import HistoryChart, format_duration  # noqa: F401  (HistoryChart : fichier .kv)
 from trip import TripStats
 
-__version__ = "0.9.1"
+__version__ = "0.10.0"
 AUTHOR = "Bosoochee"
 SUMMARY = (
     "D4speedmeter est un compteur pour le vélo électrique Decathlon Rockrider E-ACTV 100. "
@@ -100,6 +100,7 @@ class SpeedScreen(BoxLayout):
     cadence = NumericProperty(-1)      # -1 = inconnu
     odometer_km = NumericProperty(-1)  # -1 = inconnu
     gps_sats = NumericProperty(-1)     # satellites utilisés pour la position, -1 = inconnu
+    assist_mode = NumericProperty(-1)  # 1 Eco, 2 Medium, 3 Boost, -1 = inconnu
     speed_source = StringProperty("—")
     status = StringProperty("Vélo non connecté")
     bike_connected = BooleanProperty(False)
@@ -129,6 +130,7 @@ class D4SpeedmeterApp(App):
         self._gps_speed = None
         self._power = None              # dernières mesures du vélo (None = inconnu)
         self._cadence = None
+        self._assist_mode = None
         self._speed = 0.0
         self._speed_source = "—"
         self._location_enabled = True
@@ -348,7 +350,7 @@ class D4SpeedmeterApp(App):
         self.screen.bike_connected = self.bike.connected
         if not self.bike.connected:  # mesures instantanées périmées
             with self._lock:
-                self._power = self._cadence = None
+                self._power = self._cadence = self._assist_mode = None
         self._refresh_ui()
 
     def on_bike_data(self, values):
@@ -363,6 +365,8 @@ class D4SpeedmeterApp(App):
                 self._power = values["power_w"]
             if "cadence_rpm" in values:
                 self._cadence = values["cadence_rpm"]
+            if "assist_mode" in values:
+                self._assist_mode = values["assist_mode"]
             if "odometer_m" in values:
                 self.trip.update_odometer(values["odometer_m"])
 
@@ -420,6 +424,7 @@ class D4SpeedmeterApp(App):
             speed, s.speed_source = self._speed, self._speed_source
             s.power = -1 if self._power is None else self._power
             s.cadence = -1 if self._cadence is None else self._cadence
+            s.assist_mode = -1 if self._assist_mode is None else self._assist_mode
             s.battery = -1 if self.trip.battery_pct is None else self.trip.battery_pct
             s.avg_speed = self.trip.avg_kmh
             s.distance = self.trip.distance_km

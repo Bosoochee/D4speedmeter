@@ -5,7 +5,7 @@ import math
 from kivy.core.text import Label as CoreLabel
 from kivy.graphics import Color, Ellipse, Line, Rectangle
 from kivy.metrics import dp
-from kivy.properties import NumericProperty
+from kivy.properties import ListProperty, NumericProperty
 from kivy.uix.widget import Widget
 
 
@@ -18,6 +18,8 @@ class Gauge(Widget):
     minor_step = NumericProperty(5)
     start_angle = NumericProperty(-135)  # 0 = haut, sens horaire (convention Kivy)
     end_angle = NumericProperty(135)
+    # Couleur du cercle (mode d'assistance) ; vide = dégradé vert -> rouge selon la vitesse
+    mode_color = ListProperty([])
 
     # Géométrie calculée, utilisable depuis le .kv pour placer l'affichage numérique
     radius = NumericProperty(0)
@@ -30,7 +32,8 @@ class Gauge(Widget):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         self._labels = {}
-        self.bind(pos=self.redraw, size=self.redraw, value=self.redraw, max_value=self.redraw)
+        self.bind(pos=self.redraw, size=self.redraw, value=self.redraw, max_value=self.redraw,
+                  mode_color=self.redraw)
 
     def value_to_angle(self, value):
         ratio = max(0.0, min(value / self.max_value, 1.0))
@@ -70,11 +73,18 @@ class Gauge(Widget):
         ratio = max(0.0, min(self.value / self.max_value, 1.0))
 
         with self.canvas:
-            # Fond de l'arc
-            Color(0.18, 0.18, 0.22, 1)
+            mode = self.mode_color
+            # Fond de l'arc : couleur du mode d'assistance atténuée, sinon gris
+            if mode:
+                Color(mode[0] * 0.4, mode[1] * 0.4, mode[2] * 0.4, 1)
+            else:
+                Color(0.18, 0.18, 0.22, 1)
             Line(ellipse=(*box, self.start_angle, self.end_angle), width=thickness, cap="round")
-            # Arc de progression : vert -> orange -> rouge
-            Color(min(1, ratio * 2), min(1, 2 - ratio * 2), 0.1, 1)
+            # Arc de progression : couleur du mode, sinon vert -> orange -> rouge selon la vitesse
+            if mode:
+                Color(*mode)
+            else:
+                Color(min(1, ratio * 2), min(1, 2 - ratio * 2), 0.1, 1)
             if self.value >= 0.5:
                 Line(ellipse=(*box, self.start_angle, value_angle), width=thickness, cap="round")
 
