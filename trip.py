@@ -10,6 +10,7 @@
 import json
 import math
 import os
+import time
 
 MOVING_THRESHOLD_KMH = 1.0  # en dessous, on considère le vélo à l'arrêt
 SERIES = ("speed", "power", "cadence")
@@ -49,7 +50,7 @@ class TripStats:
         # Historique : un point par `history_step_s` secondes de déplacement (None = inconnu)
         self.history = {key: [] for key in SERIES}
         self.history_step_s = 1.0
-        self.track = []  # tracé GPS : [[lat, lon], ...]
+        self.track = []  # tracé GPS : [[lat, lon, heure (s depuis 1970)], ...]
         self._clear_bucket()
 
     def _clear_bucket(self):
@@ -105,7 +106,7 @@ class TripStats:
         """Ajoute une position GPS au tracé si elle est précise et assez éloignée de la précédente."""
         if accuracy_m is not None and accuracy_m > TRACK_MAX_ACCURACY_M:
             return
-        point = [round(lat, 6), round(lon, 6)]
+        point = [round(lat, 6), round(lon, 6), int(time.time())]
         # Écart inférieur à l'incertitude de position : bruit GPS, pas un déplacement
         min_step = max(TRACK_MIN_STEP_M, accuracy_m or 0)
         if self.track and distance_m(self.track[-1], point) < min_step:

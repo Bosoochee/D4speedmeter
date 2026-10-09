@@ -44,7 +44,7 @@ class TrackLayer(MapLayer):
         if mapview is None or not self.points:
             return
         xy = []
-        for lat, lon in self.points:
+        for lat, lon, *_ in self.points:
             xy += mapview.get_window_xy_from(lat, lon, mapview.zoom)
         radius = dp(6)
         with self.canvas:

@@ -18,7 +18,19 @@ Compteur pour le vélo électrique **Decathlon Rockrider E-ACTV 100**, écrit en
 - Au lancement, propose d'activer la localisation si elle est coupée
 - Fonctionne écran éteint (service de premier plan + notification) ; bouton rond marche/arrêt
   pour quitter ; toutes les données sont sauvegardées et réaffichées au redémarrage
+- « Trip reset » demande confirmation et peut d'abord exporter le parcours GPS en GPX
 - Bouton « Paramètres » : version, auteur, km total du vélo, résumé
+
+## Export du parcours (Strava...)
+
+Au « Trip reset », « Exporter le parcours et remettre à zéro » enregistre le tracé GPS en
+fichier GPX dans **Téléchargements/D4speedmeter** puis ouvre le menu de partage Android
+(Drive, mail...). Pour Strava (compte gratuit) : sur <https://www.strava.com/upload/select>,
+importer le fichier depuis le navigateur du téléphone ou d'un PC. Le fichier contient
+aussi un résumé (distance, temps, vitesse, puissance, cadence). Code : [gpx.py](gpx.py).
+
+L'envoi automatique par l'API Strava n'est pas utilisé : il exige un abonnement Strava.
+Seuls les points GPS horodatés (enregistrés depuis la version 0.12.0) sont exportés.
 
 ## Protocole Bluetooth (EB100)
 

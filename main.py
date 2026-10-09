@@ -21,9 +21,10 @@ import gauge  # noqa: F401  (enregistre le widget Gauge pour le fichier .kv)
 import icons  # noqa: F401  (enregistre GearButton pour le fichier .kv)
 from bike import create_bike_link
 from chart import HistoryChart, format_duration  # noqa: F401  (HistoryChart : fichier .kv)
+from gpx import export_gpx
 from trip import TripStats
 
-__version__ = "0.11.1"
+__version__ = "0.12.0"
 AUTHOR = "Bosoochee"
 SUMMARY = (
     "D4speedmeter est un compteur pour le vélo électrique Decathlon Rockrider E-ACTV 100. "
@@ -82,6 +83,26 @@ def set_background_service(running):
             service.stop(activity)
     except Exception as exc:
         print(f"KeepAliveService indisponible : {exc!r}")
+
+
+def toast(text):
+    """Message bref en bas de l'écran (Android), console sinon."""
+    if platform != "android":
+        print(text)
+        return
+    try:
+        from android.runnable import run_on_ui_thread
+        from jnius import autoclass, cast
+
+        @run_on_ui_thread
+        def show():
+            activity = autoclass("org.kivy.android.PythonActivity").mActivity
+            message = cast("java.lang.CharSequence", autoclass("java.lang.String")(text))
+            autoclass("android.widget.Toast").makeText(activity, message, 1).show()
+
+        show()
+    except Exception as exc:
+        print(f"Toast indisponible : {exc!r}")
 
 
 class SplashScreen(FloatLayout):
@@ -446,10 +467,38 @@ class D4SpeedmeterApp(App):
         Animation.cancel_all(s, "speed")
         Animation(speed=speed, duration=0.6, t="out_quad").start(s)
 
-    def reset_trip(self):
+    def open_reset_popup(self):
+        popup = Factory.ResetPopup()
         with self._lock:
+            popup.gps_points = sum(1 for p in self.trip.track if len(p) >= 3)
+        popup.open()
+
+    def reset_trip(self, export=False):
+        with self._lock:
+            track, description = list(self.trip.track), self._trip_description()
             self.trip.reset()
         self._refresh_ui()
+        if export:
+            try:
+                location = export_gpx(track, description, self.files_dir)
+                toast(f"Parcours enregistré : {location}" if location else "Pas de parcours GPS.")
+            except Exception as exc:
+                toast(f"Export du parcours impossible : {exc}")
+
+    def _trip_description(self):
+        """Résumé du trajet pour le fichier GPX (à appeler sous self._lock)."""
+        t = self.trip
+        lines = []
+        if t.distance_km > 0:
+            lines.append(f"Distance (compteur du vélo) : {t.distance_km:.2f} km")
+        lines.append(f"Temps de déplacement : {format_duration(t.moving_s)}")
+        lines.append(f"Vitesse moyenne : {t.avg_kmh:.1f} km/h · max {t.peak['speed']:.1f} km/h")
+        if t.peak["power"] > 0:
+            lines.append(f"Puissance moyenne : {t.mean('power'):.0f} W · max {t.peak['power']:.0f} W")
+        if t.peak["cadence"] > 0:
+            lines.append(f"Cadence moyenne : {t.mean('cadence'):.0f} tr/min")
+        lines.append("Enregistré avec D4speedmeter (Rockrider E-ACTV 100)")
+        return "\n".join(lines)
 
     # ---------- Arrêt ----------
     def quit_app(self):

@@ -208,7 +208,7 @@
             size_hint: None, None
             size: dp(44), dp(44)
             pos_hint: {"center_y": 0.5}
-            on_release: app.reset_trip()
+            on_release: app.open_reset_popup()
         PowerButton:
             size_hint: None, None
             size: dp(44), dp(44)
@@ -433,6 +433,40 @@
                 text: "Quitter"
                 background_color: 0.5, 0.15, 0.15, 1
                 on_release: root.dismiss(); app.quit_app()
+
+<ResetPopup@Popup>:
+    title: "Remise à zéro du trajet"
+    gps_points: 0     # points GPS horodatés du trajet
+    can_export: self.gps_points >= 2
+    size_hint: 0.9, None
+    height: dp(350)
+    BoxLayout:
+        orientation: "vertical"
+        spacing: dp(10)
+        Label:
+            text: "Enregistrer le parcours GPS (fichier GPX, à importer sur strava.com) avant d'effacer le trajet ?" if root.can_export else "Pas de parcours GPS à enregistrer : le trajet sera effacé."
+            font_size: sp(14)
+            halign: "center"
+            text_size: self.width, None
+        FlatButton:
+            text: "Exporter le parcours et remettre à zéro"
+            size_hint_y: None
+            height: dp(52)
+            disabled: not root.can_export
+            opacity: 1 if root.can_export else 0.35
+            background_color: 0.85, 0.32, 0.08, 1
+            on_release: root.dismiss(); app.reset_trip(export=True)
+        FlatButton:
+            text: "Remettre à zéro sans exporter"
+            size_hint_y: None
+            height: dp(52)
+            background_color: 0.6, 0.4, 0.15, 1
+            on_release: root.dismiss(); app.reset_trip()
+        FlatButton:
+            text: "Annuler"
+            size_hint_y: None
+            height: dp(52)
+            on_release: root.dismiss()
 
 <DeviceButton@FlatButton>:
     markup: True
