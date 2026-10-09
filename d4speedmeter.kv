@@ -99,10 +99,6 @@
             bold: True
             size_hint_x: None
             width: self.texture_size[0]
-        HeadlightBadge:
-            light_on: root.light_on
-            size_hint_x: None
-            width: self.height
         Widget:
         GearButton:
             size_hint_x: None
@@ -122,6 +118,12 @@
             # Cercle aux couleurs du mode d'assistance : Eco vert, Medium orange, Boost rouge
             mode_color: {1: [0.25, 0.8, 0.3, 1], 2: [1, 0.6, 0.1, 1], 3: [0.95, 0.25, 0.2, 1]}.get(int(root.assist_mode), [])
             pos_hint: {"x": 0, "y": 0}
+        # Voyant du phare, dans le coin haut gauche (sous le titre)
+        HeadlightBadge:
+            light_on: root.light_on
+            size_hint: None, None
+            size: dp(40), dp(40)
+            pos_hint: {"x": 0, "top": 1}
         Label:
             text: "{:.1f}".format(root.speed)
             bold: True

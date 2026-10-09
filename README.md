@@ -4,7 +4,7 @@ Compteur pour le vélo électrique **Decathlon Rockrider E-ACTV 100**, écrit en
 
 - Cadran 0–50 km/h + affichage numérique ; cercle aux couleurs du mode d'assistance du vélo
   (Eco vert, Medium orange, Boost rouge)
-- Voyant du phare du vélo à côté du titre (gris : éteint, vert : allumé)
+- Voyant du phare du vélo sous le titre (gris : éteint, vert : allumé)
 - Écran de démarrage : logo + « By Bosoochee » (un point de plus par seconde)
 - Vitesse, puissance et cadence fournies par le vélo
 - Temps de déplacement (arrêté quand le vélo ne roule pas), vitesse moyenne, distance
@@ -68,6 +68,9 @@ buildozer -v android debug
 ```
 
 L'APK est généré dans `bin/` (`d4speedmeter-<version>-arm64-v8a-debug.apk`).
+Les fichiers intermédiaires sont placés sur le disque Linux de WSL (`build_dir` dans
+[buildozer.spec](buildozer.spec)) : bien plus rapide que `/mnt/c`, et les recompilations
+réutilisent les bibliothèques déjà construites.
 
 Particularités de [buildozer.spec](buildozer.spec), nécessaires avec python-for-android actuel (Python 3.14) :
 - `kivy==2.3.1` (2.3.0 ne compile pas avec Python 3.14) ;

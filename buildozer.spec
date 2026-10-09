@@ -6,7 +6,7 @@ source.dir = .
 source.include_exts = py,png,jpg,kv,atlas,ttf
 source.exclude_dirs = java_src,bin,.venv
 source.exclude_patterns = tools_*.py
-version = 0.11.0
+version = 0.11.1
 
 requirements = python3,kivy==2.3.1,plyer,android,charset_normalizer==3.4.5
 
@@ -31,5 +31,7 @@ android.add_src = java_src
 p4a.extra_args = '--native-service=org.d4.KeepAliveService" android:foregroundServiceType="connectedDevice|location" android:exported="false'
 
 [buildozer]
+# Dossier de compilation sur le disque Linux de WSL (beaucoup plus rapide que /mnt/c)
+build_dir = /home/bosooche/.buildozer-d4speedmeter
 log_level = 2
 warn_on_root = 1
