@@ -1,4 +1,4 @@
-"""Courbe d'historique (vitesse, puissance ou cadence) depuis la dernière remise à zéro."""
+"""Courbe d'historique (vitesse, P hum ou P vélo) depuis la dernière remise à zéro."""
 
 import math
 

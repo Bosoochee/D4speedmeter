@@ -6,10 +6,10 @@ Compteur pour le vélo électrique **Decathlon Rockrider E-ACTV 100**, écrit en
   (Eco vert, Medium orange, Boost rouge)
 - Voyant du phare du vélo sous le titre (gris : éteint, vert : allumé)
 - Écran de démarrage : logo + « By Bosoochee » (un point de plus par seconde)
-- Vitesse, puissance et cadence fournies par le vélo
+- Vitesse, P hum (puissance humaine, W) et P vélo (puissance du moteur, W) fournies par le vélo
 - Temps de déplacement (arrêté quand le vélo ne roule pas), vitesse moyenne, distance
   depuis le dernier reset (bouton « Trip reset ») ; heure du téléphone
-- Toucher le cadran, la puissance ou la cadence : courbe depuis le dernier reset, avec
+- Toucher le cadran, P hum ou P vélo : courbe depuis le dernier reset, avec
   maximum et moyenne (remis à zéro par « Trip reset »)
 - Batterie du vélo (%)
 - Connexion Bluetooth Low Energy au vélo ; vitesse GPS du téléphone en secours
@@ -27,7 +27,7 @@ Au « Trip reset », « Exporter le parcours et remettre à zéro » enregistre 
 fichier GPX dans **Téléchargements/D4speedmeter** puis ouvre le menu de partage Android
 (Drive, mail...). Pour Strava (compte gratuit) : sur <https://www.strava.com/upload/select>,
 importer le fichier depuis le navigateur du téléphone ou d'un PC. Le fichier contient
-aussi un résumé (distance, temps, vitesse, puissance, cadence). Code : [gpx.py](gpx.py).
+aussi un résumé (distance, temps, vitesse, P hum, P vélo). Code : [gpx.py](gpx.py).
 
 L'envoi automatique par l'API Strava n'est pas utilisé : il exige un abonnement Strava.
 Seuls les points GPS horodatés (enregistrés depuis la version 0.12.0) sont exportés.
@@ -43,7 +43,7 @@ Les caractéristiques sont repérées par leur handle GATT (`getInstanceId()` so
 | `0x0045` | commande (écriture) | init `01 05 00000001`, lecture registre `01 01 07 41 00 RR`, réglage du mode d'assistance `02 05 00000020 0M` (M = 1 Eco, 2 Medium, 3 Boost) |
 | `0x0047` | réponse (notify) | écho de la commande + valeur ; trames `FF` = remplissage. Le registre `0x41` vaut toujours `0x64` : ce n'est **pas** la batterie |
 | `0x0033` | batterie (standard `0x2A19`, read/notify) | batterie en %, octet décimal (`0x41` = 65 %, vérifié sur l'écran du vélo) |
-| `0x003a` | mesures (notify) | mots 16 bits LE : puissance W×100 (offset 0), vitesse km/h×100 (6), cadence tr/min×100 (12), tension mV (16) |
+| `0x003a` | mesures (notify) | mots 16 bits LE : P hum W×100 (offset 0), vitesse km/h×100 (6), P vélo W×10 (12), tension mV (16) |
 | `0x003d` | statut (notify) | `41` puis compteur total du vélo en mètres (octets 1-4, LE) ; vérifié : +281 m pour 280 m intégrés depuis la vitesse |
 | `0x0037` | événements (indicate) | octet 2 = phare (0 éteint, 1 allumé ; commandé au guidon, pas de commande BLE), octet 3 = mode d'assistance actif (1 Eco, 2 Medium, 3 Boost) ; à chaque changement et périodiquement |
 

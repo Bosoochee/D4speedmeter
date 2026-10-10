@@ -46,7 +46,7 @@
     background_color: 0.25, 0.25, 0.32, 1
 
 <Tile@ButtonBehavior+BoxLayout>:
-    # Touchable : `on_release` ouvre la courbe correspondante (puissance, cadence)
+    # Touchable : `on_release` ouvre la courbe correspondante (P hum, P vélo)
     title: ""
     value: ""
     value_color: 1, 1, 1, 1
@@ -178,12 +178,12 @@
             title: "Vitesse moyenne"
             value: "{:.1f} km/h".format(root.avg_speed)
         Tile:
-            title: "Puissance  ›"
+            title: "P hum (W)  ›"
             value: "--" if root.power < 0 else "{:.0f} W".format(root.power)
             on_release: app.open_chart("power")
         Tile:
-            title: "Cadence  ›"
-            value: "--" if root.cadence < 0 else "{:.0f} tr/min".format(root.cadence)
+            title: "P vélo (W)  ›"
+            value: "--" if root.cadence < 0 else "{:.0f} W".format(root.cadence)
             on_release: app.open_chart("cadence")
         Tile:
             title: "Heure"

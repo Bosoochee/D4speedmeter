@@ -24,14 +24,14 @@ from chart import HistoryChart, format_duration  # noqa: F401  (HistoryChart : f
 from gpx import export_gpx
 from trip import TripStats
 
-__version__ = "0.12.0"
+__version__ = "0.13.0"
 AUTHOR = "Bosoochee"
 SUMMARY = (
     "D4speedmeter est un compteur pour le vélo électrique Decathlon Rockrider E-ACTV 100. "
-    "Il se connecte au vélo en Bluetooth pour afficher la vitesse, la puissance, la "
-    "cadence et la batterie, et calcule le temps de déplacement, la vitesse moyenne et la "
+    "Il se connecte au vélo en Bluetooth pour afficher la vitesse, la puissance humaine, la "
+    "puissance du vélo et la batterie, et calcule le temps de déplacement, la vitesse moyenne et la "
     "distance parcourue (d'après le compteur total du vélo) depuis la dernière remise à "
-    "zéro. Touchez le cadran, la puissance ou la cadence pour voir la courbe du trajet. "
+    "zéro. Touchez le cadran, P hum ou P vélo pour voir la courbe du trajet. "
     "Sans vélo connecté, la vitesse est mesurée par le GPS du téléphone."
 )
 
@@ -48,8 +48,8 @@ SPLASH_S = 3               # durée de l'écran de démarrage (un point de plus 
 # Courbes : clé de l'historique -> (titre, unité, format des valeurs)
 CHARTS = {
     "speed": ("Vitesse", "km/h", "{:.1f}"),
-    "power": ("Puissance", "W", "{:.0f}"),
-    "cadence": ("Cadence", "tr/min", "{:.0f}"),
+    "power": ("P hum", "W", "{:.0f}"),
+    "cadence": ("P vélo", "W", "{:.0f}"),
 }
 
 
@@ -494,9 +494,9 @@ class D4SpeedmeterApp(App):
         lines.append(f"Temps de déplacement : {format_duration(t.moving_s)}")
         lines.append(f"Vitesse moyenne : {t.avg_kmh:.1f} km/h · max {t.peak['speed']:.1f} km/h")
         if t.peak["power"] > 0:
-            lines.append(f"Puissance moyenne : {t.mean('power'):.0f} W · max {t.peak['power']:.0f} W")
+            lines.append(f"P hum moyenne : {t.mean('power'):.0f} W · max {t.peak['power']:.0f} W")
         if t.peak["cadence"] > 0:
-            lines.append(f"Cadence moyenne : {t.mean('cadence'):.0f} tr/min")
+            lines.append(f"P vélo moyenne : {t.mean('cadence'):.0f} W · max {t.peak['cadence']:.0f} W")
         lines.append("Enregistré avec D4speedmeter (Rockrider E-ACTV 100)")
         return "\n".join(lines)
 

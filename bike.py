@@ -5,7 +5,7 @@ avec l'appli Decathlon. Caractéristiques utilisées (repérées par leur handle
 
 - 0x0045 (écriture)  : canal de commande (init, lecture de registres, mode d'assistance) ;
 - 0x0047 (notify)    : réponses aux commandes (non exploitées) ;
-- 0x003a (notify)    : mesures - puissance, vitesse, cadence (/100), tension (mV) ;
+- 0x003a (notify)    : mesures - P hum (W/100), vitesse, P vélo (W/10), tension (mV) ;
 - 0x003d (notify)    : statut - compteur total du vélo (odomètre) en mètres ;
 - 0x0037 (indicate)  : événements - octet 2 = phare (0 éteint, 1 allumé ; le phare se
   commande au guidon, aucune commande BLE), octet 3 = mode d'assistance actif (1 Eco,
@@ -96,7 +96,7 @@ def parse_measure(data):
     power, speed, cadence, millivolts = (struct.unpack_from("<H", data, offset)[0]
                                          for offset in (0, 6, 12, 16))
     return {"power_w": power / 100, "speed_kmh": speed / 100,
-            "cadence_rpm": cadence / 100, "voltage_v": millivolts / 1000}
+            "cadence_rpm": cadence / 10, "voltage_v": millivolts / 1000}
 
 
 def parse_status(data):
