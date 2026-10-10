@@ -24,7 +24,7 @@ from chart import HistoryChart, format_duration  # noqa: F401  (HistoryChart : f
 from gpx import export_gpx
 from trip import TripStats
 
-__version__ = "0.13.0"
+__version__ = "0.13.1"
 AUTHOR = "Bosoochee"
 SUMMARY = (
     "D4speedmeter est un compteur pour le vélo électrique Decathlon Rockrider E-ACTV 100. "

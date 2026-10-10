@@ -43,8 +43,8 @@ Les caractéristiques sont repérées par leur handle GATT (`getInstanceId()` so
 | `0x0045` | commande (écriture) | init `01 05 00000001`, lecture registre `01 01 07 41 00 RR`, réglage du mode d'assistance `02 05 00000020 0M` (M = 1 Eco, 2 Medium, 3 Boost) |
 | `0x0047` | réponse (notify) | écho de la commande + valeur ; trames `FF` = remplissage. Le registre `0x41` vaut toujours `0x64` : ce n'est **pas** la batterie |
 | `0x0033` | batterie (standard `0x2A19`, read/notify) | batterie en %, octet décimal (`0x41` = 65 %, vérifié sur l'écran du vélo) |
-| `0x003a` | mesures (notify) | mots 16 bits LE : P hum W×100 (offset 0), vitesse km/h×100 (6), P vélo W×10 (12), tension mV (16) |
-| `0x003d` | statut (notify) | `41` puis compteur total du vélo en mètres (octets 1-4, LE) ; vérifié : +281 m pour 280 m intégrés depuis la vitesse |
+| `0x003a` | mesures (notify) | mots 16 bits LE : P hum W×10 (offset 0), vitesse km/h×100 (6), P vélo W×100 (12), tension mV (16) |
+| `0x003d` | statut (notify) | octet 0 = batterie en % (et non un en-tête fixe `41`), puis compteur total du vélo en mètres (octets 1-4, LE) ; vérifié : +281 m pour 280 m intégrés depuis la vitesse |
 | `0x0037` | événements (indicate) | octet 2 = phare (0 éteint, 1 allumé ; commandé au guidon, pas de commande BLE), octet 3 = mode d'assistance actif (1 Eco, 2 Medium, 3 Boost) ; à chaque changement et périodiquement |
 
 À la connexion, l'appli envoie l'init et la lecture du registre `0x41` (comme l'appli
